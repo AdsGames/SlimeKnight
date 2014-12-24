@@ -1,0 +1,57 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<SpriteEditorSceneProperties xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <BoundsCamera>
+    <X>0</X>
+    <Y>0</Y>
+    <Z>-40</Z>
+    <Orthogonal>false</Orthogonal>
+    <OrthogonalHeight>600</OrthogonalHeight>
+    <OrthogonalWidth>800</OrthogonalWidth>
+    <NearClipPlane>1</NearClipPlane>
+    <FarClipPlane>1000</FarClipPlane>
+  </BoundsCamera>
+  <Camera>
+    <X>4.467944</X>
+    <Y>0</Y>
+    <Z>-56.4922752</Z>
+    <Orthogonal>true</Orthogonal>
+    <OrthogonalHeight>51.00069</OrthogonalHeight>
+    <OrthogonalWidth>-1</OrthogonalWidth>
+    <NearClipPlane>1</NearClipPlane>
+    <FarClipPlane>3900</FarClipPlane>
+  </Camera>
+  <BoundsVisible>false</BoundsVisible>
+  <WorldAxesVisible>true</WorldAxesVisible>
+  <PixelSize>0</PixelSize>
+  <FilesToMakeDotDotSlashRelative />
+  <TextureDisplayRegionsList>
+    <TextureDisplayRegionsSave>
+      <TextureName>worlds/scene1.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+    <TextureDisplayRegionsSave>
+      <TextureName>worlds/scene2.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+    <TextureDisplayRegionsSave>
+      <TextureName>worlds/scene3.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+    <TextureDisplayRegionsSave>
+      <TextureName>images/menu.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+    <TextureDisplayRegionsSave>
+      <TextureName>images/levelselect_level1.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+    <TextureDisplayRegionsSave>
+      <TextureName>images/frame.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+    <TextureDisplayRegionsSave>
+      <TextureName>images/buttons/back.png</TextureName>
+      <DisplayRegions />
+    </TextureDisplayRegionsSave>
+  </TextureDisplayRegionsList>
+</SpriteEditorSceneProperties>
