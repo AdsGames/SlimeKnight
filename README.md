@@ -31,4 +31,4 @@ emcmake cmake --preset debug
 cmake --build --preset debug
 ```
 
-The legacy VB.NET project is kept in `ConsoleApplication1/` for reference.
+The original VB.NET source, scene layouts and layered Paint.NET art are kept in `original/` for reference.

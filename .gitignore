@@ -44,3 +44,14 @@ Temporary Items
 
 # CMake build
 /build
+
+# Visual Studio (legacy project)
+[Bb]in/
+[Oo]bj/
+*.suo
+*.user
+*.vshost.*
+
+# Editor / tooling
+.cache/
+compile_commands.json
