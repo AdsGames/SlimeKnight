@@ -41,3 +41,17 @@ $RECYCLE.BIN/
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# CMake build
+/build
+
+# Visual Studio (legacy project)
+[Bb]in/
+[Oo]bj/
+*.suo
+*.user
+*.vshost.*
+
+# Editor / tooling
+.cache/
+compile_commands.json

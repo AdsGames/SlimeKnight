@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Basic Express 2010
-Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "ConsoleApplication1", "ConsoleApplication1\ConsoleApplication1.vbproj", "{75423767-9A78-4617-BA2C-0491408D3CCD}"
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "ConsoleApplication1", "ConsoleApplication1.vbproj", "{75423767-9A78-4617-BA2C-0491408D3CCD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
