@@ -7,15 +7,6 @@
 inline constexpr int SCREEN_W = 1280;
 inline constexpr int SCREEN_H = 960;
 
-// Fixed simulation step in seconds, matches the asw desktop timestep (8ms)
-inline constexpr float FIXED_STEP = 0.008F;
-
-// Longest frame time simulated at once
-inline constexpr float MAX_LAG = 0.1F;
-
-// Absorbs float error when asw passes exactly one step
-inline constexpr float STEP_EPSILON = 0.00001F;
-
 inline constexpr int LEVEL_COUNT = 3;
 
 // Stats for the level that was last played

@@ -5,9 +5,14 @@
 #include <numbers>
 
 namespace {
-constexpr std::size_t MAX_PARTICLES = 1500;
+constexpr uint32_t PARTICLES_PER_EMITTER = 400;
+constexpr std::size_t MAX_DEBRIS = 200;
 constexpr std::size_t MAX_DECALS = 250;
 constexpr float DECAL_LIFE = 20.0F;
+
+// asw particles have no drag, so bursts are slowed to travel about as far
+// as before
+constexpr float BURST_SPEED_SCALE = 0.7F;
 }  // namespace
 
 void Effects::init(const asw::Font& small_font, const asw::Font& big_font) {
@@ -17,19 +22,32 @@ void Effects::init(const asw::Font& small_font, const asw::Font& big_font) {
 }
 
 void Effects::clear() {
-  particles.clear();
+  emitters.clear();
+  debris_list.clear();
   texts.clear();
   decals.clear();
 }
 
 void Effects::update(float dt) {
-  for (auto& p : particles) {
-    p.life -= dt;
-    p.velocity.y += p.gravity * dt;
-    p.velocity = p.velocity * std::exp(-2.5F * dt);
-    p.position += p.velocity * dt;
+  for (auto& pool : emitters) {
+    pool.emitter.update(dt);
   }
-  std::erase_if(particles, [](const Particle& p) { return p.life <= 0.0F; });
+
+  for (auto& d : debris_list) {
+    d.life -= dt;
+    d.velocity.y += 1400.0F * dt;
+    d.position += d.velocity * dt;
+    d.angle += d.spin * dt;
+
+    // Bounce off the ground, losing most of the energy each time
+    if (d.position.y > d.ground && d.velocity.y > 0.0F) {
+      d.position.y = d.ground;
+      d.velocity.y *= -0.35F;
+      d.velocity.x *= 0.6F;
+      d.spin *= 0.6F;
+    }
+  }
+  std::erase_if(debris_list, [](const Debris& d) { return d.life <= 0.0F; });
 
   for (auto& t : texts) {
     t.life -= dt;
@@ -43,7 +61,7 @@ void Effects::update(float dt) {
   std::erase_if(decals, [](const Decal& d) { return d.life <= 0.0F; });
 }
 
-void Effects::draw_ground(const Camera& camera) const {
+void Effects::draw_ground(const asw::Camera& camera) const {
   const auto view = camera.get_view();
 
   for (const auto& d : decals) {
@@ -53,41 +71,91 @@ void Effects::draw_ground(const Camera& camera) const {
 
     const float alpha = std::clamp(d.life / 3.0F, 0.0F, 1.0F) * 0.85F;
     asw::draw::set_alpha(d.texture, alpha);
-    asw::draw::stretch_sprite(d.texture, camera.to_screen(d.transform));
+    asw::draw::stretch_sprite(d.texture, camera.world_to_screen(d.transform));
     asw::draw::set_alpha(d.texture, 1.0F);
   }
 }
 
-void Effects::draw_top(const Camera& camera) const {
+void Effects::draw_top(const asw::Camera& camera) const {
   const auto view = camera.get_view();
 
-  for (const auto& p : particles) {
-    if (!view.contains(p.position)) {
+  for (const auto& d : debris_list) {
+    if (!view.contains(d.position)) {
       continue;
     }
 
-    const float t = std::clamp(p.life / p.max_life, 0.0F, 1.0F);
-    const float size = std::max(1.0F, p.size * t);
-    auto color = p.color;
-    color.a = static_cast<uint8_t>(static_cast<float>(color.a) * t);
-    const auto screen = camera.to_screen(p.position);
-    asw::draw::rect_fill(
-        asw::Quadf(screen.x - size / 2, screen.y - size / 2, size, size),
-        color);
+    auto color = d.color;
+    color.a = static_cast<uint8_t>(
+        255.0F * std::clamp(d.life / (d.max_life * 0.3F), 0.0F, 1.0F));
+    const auto screen = camera.world_to_screen(d.position);
+    asw::draw::rect_fill_rotate(
+        asw::Quadf(screen.x - d.size.x / 2, screen.y - d.size.y / 2, d.size.x,
+                   d.size.y),
+        d.angle, color);
+  }
+
+  for (auto& pool : emitters) {
+    pool.emitter.draw(camera);
   }
 
   for (const auto& t : texts) {
     const float fade = std::clamp(t.life / (t.max_life * 0.5F), 0.0F, 1.0F);
-    const auto screen = camera.to_screen(t.position);
+    const auto screen = camera.world_to_screen(t.position);
     const auto& font = t.big ? big_font : small_font;
 
-    auto shadow = asw::Color(0, 0, 0, static_cast<uint8_t>(200.0F * fade));
     auto color = t.color;
     color.a = static_cast<uint8_t>(255.0F * fade);
-    asw::draw::text(font, t.text, screen + asw::Vec2f(2, 2), shadow,
-                    asw::TextJustify::Center);
-    asw::draw::text(font, t.text, screen, color, asw::TextJustify::Center);
+    asw::draw::text_shadow(font, t.text, screen, color, asw::Color(0, 0, 0, 200),
+                           asw::Vec2f(2, 2), asw::TextJustify::Center);
   }
+}
+
+asw::ParticleEmitter& Effects::emitter_for(const asw::Color& color,
+                                           float speed,
+                                           float size,
+                                           float gravity,
+                                           bool ring) {
+  for (auto& pool : emitters) {
+    if (pool.color.r == color.r && pool.color.g == color.g &&
+        pool.color.b == color.b && pool.color.a == color.a &&
+        pool.speed == speed && pool.size == size && pool.gravity == gravity &&
+        pool.ring == ring) {
+      return pool.emitter;
+    }
+  }
+
+  asw::ParticleConfig config;
+  config.color_start = color;
+  config.color_end = color;
+  config.alpha_start = static_cast<float>(color.a) / 255.0F;
+  config.alpha_end = 0.0F;
+  config.gravity = asw::Vec2f(0.0F, gravity);
+
+  if (ring) {
+    // Every particle leaves at the same speed, so they stay in a ring
+    config.speed_min = speed;
+    config.speed_max = speed;
+    config.lifetime_min = 0.45F;
+    config.lifetime_max = 0.45F;
+    config.size_start = size;
+    config.size_end = size * 0.4F;
+  } else {
+    config.speed_min = speed * 0.3F * BURST_SPEED_SCALE;
+    config.speed_max = speed * BURST_SPEED_SCALE;
+    config.lifetime_min = 0.35F;
+    config.lifetime_max = 0.8F;
+    config.size_start = size * 1.3F;
+    config.size_end = size * 0.3F;
+  }
+
+  // Alpha is carried by alpha_start, the colour itself stays opaque
+  config.color_start.a = 255;
+  config.color_end.a = 255;
+
+  emitters.push_back(EmitterPool{color, speed, size, gravity, ring,
+                                 asw::ParticleEmitter(config,
+                                                      PARTICLES_PER_EMITTER)});
+  return emitters.back().emitter;
 }
 
 void Effects::burst(const asw::Vec2f& position,
@@ -96,41 +164,46 @@ void Effects::burst(const asw::Vec2f& position,
                     float speed,
                     float size,
                     float gravity) {
-  for (int i = 0; i < count && particles.size() < MAX_PARTICLES; i++) {
-    const float angle =
-        asw::random::between(0.0F, 2.0F * std::numbers::pi_v<float>);
-    const float magnitude = asw::random::between(speed * 0.3F, speed);
-
-    Particle p;
-    p.position = position;
-    p.velocity =
-        asw::Vec2f(std::cos(angle) * magnitude, std::sin(angle) * magnitude);
-    p.color = color;
-    p.max_life = asw::random::between(0.35F, 0.8F);
-    p.life = p.max_life;
-    p.size = asw::random::between(size * 0.6F, size * 1.4F);
-    p.gravity = gravity;
-    particles.push_back(p);
-  }
+  auto& emitter = emitter_for(color, speed, size, gravity, false);
+  emitter.transform.position = position;
+  emitter.emit(static_cast<uint32_t>(count));
 }
 
 void Effects::ring(const asw::Vec2f& position,
                    float radius,
                    const asw::Color& color) {
-  constexpr int count = 48;
-  for (int i = 0; i < count && particles.size() < MAX_PARTICLES; i++) {
-    const float angle =
-        (static_cast<float>(i) / count) * 2.0F * std::numbers::pi_v<float>;
-    const auto dir = asw::Vec2f(std::cos(angle), std::sin(angle) * 0.6F);
+  // Travels about the radius over the particle lifetime
+  auto& emitter = emitter_for(color, radius / 0.45F, 10.0F, 0.0F, true);
+  emitter.transform.position = position;
+  emitter.emit(48);
+}
 
-    Particle p;
-    p.position = position + dir * (radius * 0.2F);
-    p.velocity = dir * (radius * 3.5F);
-    p.color = color;
-    p.max_life = 0.45F;
-    p.life = p.max_life;
-    p.size = 10.0F;
-    particles.push_back(p);
+void Effects::debris(const asw::Vec2f& position,
+                     float ground,
+                     const asw::Color& color,
+                     int count) {
+  for (int i = 0; i < count && debris_list.size() < MAX_DEBRIS; i++) {
+    Debris d;
+    d.position = position + asw::Vec2f(asw::random::between(-50.0F, 50.0F),
+                                       asw::random::between(-60.0F, 30.0F));
+    d.velocity = asw::Vec2f(asw::random::between(-380.0F, 380.0F),
+                            asw::random::between(-760.0F, -260.0F));
+    d.size = asw::Vec2f(asw::random::between(8.0F, 22.0F),
+                        asw::random::between(6.0F, 16.0F));
+
+    // Vary the shade so the pile does not look flat
+    const float shade = asw::random::between(0.7F, 1.2F);
+    d.color = asw::Color(
+        static_cast<uint8_t>(std::min(255.0F, color.r * shade)),
+        static_cast<uint8_t>(std::min(255.0F, color.g * shade)),
+        static_cast<uint8_t>(std::min(255.0F, color.b * shade)));
+
+    d.angle = asw::random::between(0.0F, 2.0F * std::numbers::pi_v<float>);
+    d.spin = asw::random::between(-14.0F, 14.0F);
+    d.ground = ground + asw::random::between(-20.0F, 70.0F);
+    d.max_life = asw::random::between(1.6F, 2.6F);
+    d.life = d.max_life;
+    debris_list.push_back(d);
   }
 }
 

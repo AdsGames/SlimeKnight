@@ -1,9 +1,11 @@
 #include "knight.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
+#include "../controls.h"
 #include "audio.h"
 
 namespace {
@@ -19,82 +21,23 @@ constexpr float DASH_TIME = 0.17F;
 constexpr float DASH_SPEED = 1000.0F;
 constexpr float DASH_COOLDOWN = 0.45F;
 constexpr float INVULNERABLE_TIME = 0.8F;
-
-using asw::input::ControllerAxis;
-using asw::input::ControllerButton;
-using asw::input::Key;
 }  // namespace
 
 KnightInput KnightInput::read() {
   KnightInput input;
+  input.move = read_move();
+  input.slash = asw::input::get_action(action::SLASH);
+  input.dash = asw::input::get_action_down(action::DASH);
+  input.hammer_held = asw::input::get_action(action::HAMMER);
+  input.hammer = asw::input::get_action_down(action::HAMMER);
 
-  if (asw::input::get_key(Key::W) || asw::input::get_key(Key::Up)) {
-    input.move.y -= 1.0F;
-  }
-  if (asw::input::get_key(Key::S) || asw::input::get_key(Key::Down)) {
-    input.move.y += 1.0F;
-  }
-  if (asw::input::get_key(Key::A) || asw::input::get_key(Key::Left)) {
-    input.move.x -= 1.0F;
-  }
-  if (asw::input::get_key(Key::D) || asw::input::get_key(Key::Right)) {
-    input.move.x += 1.0F;
-  }
-
-  input.slash = asw::input::get_key(Key::Space) || asw::input::get_key(Key::J);
-  input.dash = asw::input::get_key_down(Key::LShift) ||
-               asw::input::get_key_down(Key::RShift) ||
-               asw::input::get_key_down(Key::K);
-  input.hammer_held =
-      asw::input::get_key(Key::E) || asw::input::get_key(Key::L);
-  input.hammer =
-      asw::input::get_key_down(Key::E) || asw::input::get_key_down(Key::L);
-
-  if (asw::input::get_key_down(Key::Num1)) {
-    input.package = 0;
-  } else if (asw::input::get_key_down(Key::Num2)) {
-    input.package = 1;
-  } else if (asw::input::get_key_down(Key::Num3)) {
-    input.package = 2;
-  } else if (asw::input::get_key_down(Key::Num4)) {
-    input.package = 3;
-  }
-
-  // Controller
-  if (asw::input::get_controller_count() > 0) {
-    const asw::Vec2f stick(
-        asw::input::get_controller_axis(0, ControllerAxis::LeftX),
-        asw::input::get_controller_axis(0, ControllerAxis::LeftY));
-    if (stick.magnitude() > 0.25F) {
-      input.move = stick;
+  constexpr std::array<std::string_view, 4> packages = {
+      action::PACKAGE_1, action::PACKAGE_2, action::PACKAGE_3,
+      action::PACKAGE_4};
+  for (std::size_t i = 0; i < packages.size(); i++) {
+    if (asw::input::get_action_down(packages[i])) {
+      input.package = static_cast<int>(i);
     }
-
-    input.slash = input.slash ||
-                  asw::input::get_controller_button(0, ControllerButton::A);
-    input.dash = input.dash ||
-                 asw::input::get_controller_button_down(0, ControllerButton::B);
-    input.hammer_held = input.hammer_held || asw::input::get_controller_button(
-                                                 0, ControllerButton::Y);
-    input.hammer = input.hammer || asw::input::get_controller_button_down(
-                                       0, ControllerButton::Y);
-
-    if (asw::input::get_controller_button_down(0, ControllerButton::DPadUp)) {
-      input.package = 0;
-    } else if (asw::input::get_controller_button_down(
-                   0, ControllerButton::DPadLeft)) {
-      input.package = 1;
-    } else if (asw::input::get_controller_button_down(
-                   0, ControllerButton::DPadRight)) {
-      input.package = 2;
-    } else if (asw::input::get_controller_button_down(
-                   0, ControllerButton::DPadDown)) {
-      input.package = 3;
-    }
-  }
-
-  // Diagonals are not faster
-  if (input.move.magnitude() > 1.0F) {
-    input.move = input.move / input.move.magnitude();
   }
 
   return input;
@@ -144,7 +87,7 @@ void Knight::update(float dt, const KnightInput& input) {
 
   // Facing follows movement
   if (input.move.magnitude() > 0.1F && !is_dashing()) {
-    facing = input.move / input.move.magnitude();
+    facing = input.move.normalized();
     if (std::abs(input.move.x) > 0.1F) {
       face_right = input.move.x > 0.0F;
     }
@@ -193,7 +136,7 @@ void Knight::update(float dt, const KnightInput& input) {
   energy = std::min(MAX_STAT, energy + (regen * dt));
 }
 
-void Knight::draw(const Camera& camera) const {
+void Knight::draw(const asw::Camera& camera) const {
   const auto& idle = face_right ? tex_right : tex_left;
 
   // Dash afterimages
@@ -202,7 +145,7 @@ void Knight::draw(const Camera& camera) const {
     const auto quad =
         asw::Quadf(p.x - SPRITE_W / 2, p.y - SPRITE_H, SPRITE_W, SPRITE_H);
     asw::draw::set_alpha(idle, trail_alpha);
-    asw::draw::stretch_sprite(idle, camera.to_screen(quad));
+    asw::draw::stretch_sprite(idle, camera.world_to_screen(quad));
     trail_alpha += 0.07F;
   }
   asw::draw::set_alpha(idle, 1.0F);
@@ -222,29 +165,45 @@ void Knight::draw(const Camera& camera) const {
 
   const auto quad = asw::Quadf(position.x - SPRITE_W / 2, position.y - SPRITE_H,
                                SPRITE_W, SPRITE_H);
-  asw::draw::stretch_sprite(texture, camera.to_screen(quad));
+  asw::draw::stretch_sprite(texture, camera.world_to_screen(quad));
 
   // Sword sweep
   if (is_swinging()) {
     const float progress = 1.0F - (swing_timer / SWING_TIME);
     const float base_angle = std::atan2(facing.y, facing.x);
     const float sweep = std::numbers::pi_v<float> * 0.8F;
-    const auto origin = camera.to_screen(center());
+    const auto origin = camera.world_to_screen(center());
 
-    constexpr int segments = 9;
+    // Blade trail: short rotated slices along the arc, thick and bright at
+    // the leading edge and fading behind it
+    constexpr int segments = 14;
+    constexpr float radius = 70.0F;
+    const float step = sweep / static_cast<float>(segments - 1);
+    const float slice = (radius * step) * 1.6F;
+
     for (int i = 0; i < segments; i++) {
       const float t = static_cast<float>(i) / (segments - 1);
       if (t > progress) {
         break;
       }
 
+      // How close this slice is to the tip of the swing
+      const float lead = 1.0F - std::clamp((progress - t) * 2.5F, 0.0F, 1.0F);
       const float angle = base_angle - (sweep / 2.0F) + (sweep * t);
       const auto point =
-          origin + asw::Vec2f(std::cos(angle), std::sin(angle)) * 70.0F;
-      const auto alpha =
-          static_cast<uint8_t>(90.0F + (150.0F * t * (1.0F - progress * 0.6F)));
-      asw::draw::circle_fill(point, 7.0F + (6.0F * t),
-                             asw::Color(255, 255, 255, alpha));
+          origin + asw::Vec2f(std::cos(angle), std::sin(angle)) * radius;
+      const float width = 4.0F + (14.0F * lead);
+      const auto alpha = static_cast<uint8_t>(60.0F + (195.0F * lead));
+
+      // Long side runs along the arc
+      const float tangent = angle + (std::numbers::pi_v<float> / 2.0F);
+      asw::draw::rect_fill_rotate(
+          asw::Quadf(point.x - slice / 2, point.y - width / 2, slice, width),
+          tangent, asw::Color(200, 225, 255, alpha));
+      asw::draw::rect_fill_rotate(
+          asw::Quadf(point.x - slice / 2, point.y - width / 4, slice,
+                     width / 2),
+          tangent, asw::Color(255, 255, 255, alpha));
     }
   }
 }
@@ -278,7 +237,7 @@ bool Knight::try_dash(const asw::Vec2f& direction) {
   }
 
   if (direction.magnitude() > 0.1F) {
-    facing = direction / direction.magnitude();
+    facing = direction.normalized();
     if (std::abs(direction.x) > 0.1F) {
       face_right = direction.x > 0.0F;
     }
@@ -312,7 +271,7 @@ bool Knight::hurt(int amount, const asw::Vec2f& from) {
   if (away.magnitude() < 0.01F) {
     away = asw::Vec2f(0, 1);
   }
-  velocity = (away / away.magnitude()) * 650.0F;
+  velocity = away.normalized() * 650.0F;
 
   return true;
 }

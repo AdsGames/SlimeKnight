@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include "../camera.h"
 #include "../game/effects.h"
 #include "../game/entities.h"
 #include "../game/knight.h"
@@ -47,6 +46,9 @@ class Game : public asw::scene::Scene<ProgramState> {
   void kill_slime(Slime& slime);
   asw::Vec2f slime_center(const Slime& slime) const;
 
+  // Standing tower closest to the knight, nullptr if none are left
+  const Tower* nearest_tower() const;
+
   // Push a box out of solid scenery, returns the corrected box
   asw::Quadf resolve_solids(asw::Quadf box) const;
 
@@ -69,7 +71,7 @@ class Game : public asw::scene::Scene<ProgramState> {
 
   // Objects
   Knight knight;
-  Camera camera;
+  asw::Camera camera{asw::Vec2f(SCREEN_W, SCREEN_H)};
   Effects effects;
   std::vector<Slime> slimes;
   std::vector<Slime> new_slimes;
@@ -82,7 +84,6 @@ class Game : public asw::scene::Scene<ProgramState> {
   float level_time{0.0F};
   float hitstop{0.0F};
   float finish_timer{0.0F};
-  float lag{0.0F};
   bool gates_open{false};
   bool boss_spawned{false};
   bool paused{false};
@@ -110,10 +111,10 @@ class Game : public asw::scene::Scene<ProgramState> {
   asw::Texture tex_tower;
   asw::Texture tex_tower_open;
   asw::Texture tex_tower_broken;
-  asw::Texture tex_slime_green;
-  asw::Texture tex_slime_red;
-  asw::Texture tex_slime_purple;
-  asw::Texture tex_boss;
+  asw::SpriteSheet sheet_slime_green;
+  asw::SpriteSheet sheet_slime_red;
+  asw::SpriteSheet sheet_slime_purple;
+  asw::SpriteSheet sheet_boss;
   asw::Texture tex_slime_death;
   asw::Texture tex_shadow;
   asw::Texture tex_hud;

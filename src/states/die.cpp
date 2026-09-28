@@ -2,8 +2,10 @@
 
 #include <string>
 
+#include "../controls.h"
 #include "../game/audio.h"
 #include "../globals.h"
+#include "../ui/screenshot.h"
 
 void Die::init() {
   background = asw::assets::load_texture("assets/images/ui/lose.png");
@@ -20,21 +22,15 @@ void Die::update(float dt) {
     return;
   }
 
-  const bool has_controller = asw::input::get_controller_count() > 0;
-
   // Retry straight away
-  if (asw::input::get_key_down(asw::input::Key::R) ||
-      (has_controller && asw::input::get_controller_button_down(
-                             0, asw::input::ControllerButton::Y))) {
+  if (asw::input::get_action_down(action::RETRY)) {
     Audio::play(Sfx::Click);
     manager.set_next_scene(ProgramState::Game);
     return;
   }
 
-  if (asw::input::get_key_down(asw::input::Key::Return) ||
-      asw::input::get_mouse_button_down(asw::input::MouseButton::Left) ||
-      (has_controller && asw::input::get_controller_button_down(
-                             0, asw::input::ControllerButton::A))) {
+  if (asw::input::get_action_down(action::CONFIRM) ||
+      asw::input::get_mouse_button_down(asw::input::MouseButton::Left)) {
     Audio::play(Sfx::Click);
     manager.set_next_scene(ProgramState::LevelSelect);
   }
@@ -49,7 +45,11 @@ void Die::draw() {
       "    Time: " + format_time(last_stats.time);
   asw::draw::text(font, summary, asw::Vec2f(SCREEN_W / 2.0F, 520),
                   asw::Color(0, 0, 0), asw::TextJustify::Center);
-  asw::draw::text(font, "Press R to try again",
+  asw::draw::text(font,
+                  prompt("Press R to try again",
+                         "Press Y to try again, A to continue"),
                   asw::Vec2f(SCREEN_W / 2.0F, 580), asw::Color(0, 0, 0),
                   asw::TextJustify::Center);
+
+  handle_screenshot_key();
 }

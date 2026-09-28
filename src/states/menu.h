@@ -18,6 +18,9 @@ class Menu : public asw::scene::Scene<ProgramState> {
  private:
   void draw_help() const;
 
+  // Ask before closing the game
+  static void quit();
+
   enum ButtonName { BUTTON_START, BUTTON_HELP, BUTTON_QUIT, NUM_BUTTONS };
 
   std::array<Button, NUM_BUTTONS> buttons;

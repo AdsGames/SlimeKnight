@@ -2,8 +2,10 @@
 
 #include <algorithm>
 
+#include "../controls.h"
 #include "../game/audio.h"
 #include "../globals.h"
+#include "../ui/screenshot.h"
 
 void Splash::init() {
   background = asw::assets::load_texture("assets/images/ui/splash.png");
@@ -19,16 +21,9 @@ void Splash::update(float dt) {
     return;
   }
 
-  const bool controller =
-      asw::input::get_controller_count() > 0 &&
-      (asw::input::get_controller_button_down(
-           0, asw::input::ControllerButton::A) ||
-       asw::input::get_controller_button_down(
-           0, asw::input::ControllerButton::Start));
-
   if (asw::input::get_keyboard().any_pressed ||
       asw::input::get_mouse_button_down(asw::input::MouseButton::Left) ||
-      controller) {
+      asw::input::get_action_down(action::CONFIRM)) {
     Audio::play(Sfx::Click);
     manager.set_next_scene(ProgramState::Menu);
   }
@@ -43,4 +38,6 @@ void Splash::draw() {
     asw::draw::rect_fill(asw::Quadf(0, 0, SCREEN_W, SCREEN_H),
                          asw::Color(0, 0, 0, static_cast<uint8_t>(255 * fade)));
   }
+
+  handle_screenshot_key();
 }
