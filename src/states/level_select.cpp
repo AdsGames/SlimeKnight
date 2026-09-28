@@ -3,19 +3,12 @@
 #include <string>
 
 #include "../save_data.h"
+#include "../controls.h"
 #include "../game/audio.h"
 #include "../game/level.h"
 #include "../ui/cursor.h"
+#include "../ui/screenshot.h"
 
-namespace {
-using asw::input::ControllerButton;
-using asw::input::Key;
-
-bool controller_down(ControllerButton button) {
-  return asw::input::get_controller_count() > 0 &&
-         asw::input::get_controller_button_down(0, button);
-}
-}  // namespace
 
 void LevelSelect::init() {
   for (int i = 0; i < LEVEL_COUNT; i++) {
@@ -76,27 +69,20 @@ void LevelSelect::update(float dt) {
   }
 
   // Keyboard and controller
-  if (asw::input::get_key_down(Key::Right) ||
-      asw::input::get_key_down(Key::D) ||
-      controller_down(ControllerButton::DPadRight)) {
+  if (asw::input::get_action_down(action::MENU_RIGHT)) {
     selected = (selected + 1) % LEVEL_COUNT;
     Audio::play(Sfx::Click, 0.5F);
-  } else if (asw::input::get_key_down(Key::Left) ||
-             asw::input::get_key_down(Key::A) ||
-             controller_down(ControllerButton::DPadLeft)) {
+  } else if (asw::input::get_action_down(action::MENU_LEFT)) {
     selected = selected <= 0 ? LEVEL_COUNT - 1 : selected - 1;
     Audio::play(Sfx::Click, 0.5F);
   }
 
-  if (selected >= 0 && (asw::input::get_key_down(Key::Return) ||
-                        asw::input::get_key_down(Key::Space) ||
-                        controller_down(ControllerButton::A))) {
+  if (selected >= 0 && asw::input::get_action_down(action::CONFIRM)) {
     start_level(selected);
     return;
   }
 
-  if (asw::input::get_key_down(Key::Escape) ||
-      controller_down(ControllerButton::B)) {
+  if (asw::input::get_action_down(action::BACK)) {
     Audio::play(Sfx::Click);
     manager.set_next_scene(ProgramState::Menu);
     return;
@@ -127,9 +113,8 @@ void LevelSelect::draw() {
   const auto shadow_text = [](const asw::Font& f, const std::string& text,
                               const asw::Vec2f& position,
                               const asw::Color& color) {
-    asw::draw::text(f, text, position + asw::Vec2f(2, 2), asw::Color(0, 0, 0),
-                    asw::TextJustify::Center);
-    asw::draw::text(f, text, position, color, asw::TextJustify::Center);
+    asw::draw::text_shadow(f, text, position, color, asw::Color(0, 0, 0),
+                           asw::Vec2f(2, 2), asw::TextJustify::Center);
   };
 
   shadow_text(font, "Choose your battle", asw::Vec2f(SCREEN_W / 2.0F, 150),
@@ -159,6 +144,9 @@ void LevelSelect::draw() {
                 best > 0.0F ? asw::Color(120, 255, 120)
                             : asw::Color(200, 200, 200));
   }
+
+  // Screenshots leave out the cursor
+  handle_screenshot_key();
 
   draw_cursor();
 }

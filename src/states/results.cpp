@@ -5,8 +5,10 @@
 #include <utility>
 
 #include "../save_data.h"
+#include "../controls.h"
 #include "../game/audio.h"
 #include "../globals.h"
+#include "../ui/screenshot.h"
 
 void Results::init() {
   background = asw::assets::load_texture("assets/images/ui/results.png");
@@ -23,15 +25,8 @@ void Results::update(float dt) {
     return;
   }
 
-  const bool controller =
-      asw::input::get_controller_count() > 0 &&
-      asw::input::get_controller_button_down(0,
-                                             asw::input::ControllerButton::A);
-
-  if (asw::input::get_key_down(asw::input::Key::Return) ||
-      asw::input::get_key_down(asw::input::Key::Space) ||
-      asw::input::get_mouse_button_down(asw::input::MouseButton::Left) ||
-      controller) {
+  if (asw::input::get_action_down(action::CONFIRM) ||
+      asw::input::get_mouse_button_down(asw::input::MouseButton::Left)) {
     Audio::play(Sfx::Click);
     manager.set_next_scene(ProgramState::LevelSelect);
   }
@@ -75,4 +70,12 @@ void Results::draw() {
     asw::draw::text(font, "New best time!", asw::Vec2f(106, y + 20),
                     asw::Color(255, 240, 80));
   }
+
+  // The background only mentions enter
+  if (using_controller()) {
+    asw::draw::text(font, "or press A", asw::Vec2f(SCREEN_W - 70.0F, 850),
+                    asw::Color(0, 0, 0), asw::TextJustify::Right);
+  }
+
+  handle_screenshot_key();
 }

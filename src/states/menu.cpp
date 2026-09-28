@@ -1,18 +1,11 @@
 #include "./menu.h"
 
+#include "../controls.h"
 #include "../game/audio.h"
 #include "../globals.h"
 #include "../ui/cursor.h"
+#include "../ui/screenshot.h"
 
-namespace {
-using asw::input::ControllerButton;
-using asw::input::Key;
-
-bool controller_down(ControllerButton button) {
-  return asw::input::get_controller_count() > 0 &&
-         asw::input::get_controller_button_down(0, button);
-}
-}  // namespace
 
 void Menu::init() {
   background = asw::assets::load_texture("assets/images/ui/menu.png");
@@ -39,7 +32,7 @@ void Menu::init() {
     Audio::play(Sfx::Click);
     show_help = true;
   });
-  buttons[BUTTON_QUIT].set_on_click([]() { asw::core::exit(); });
+  buttons[BUTTON_QUIT].set_on_click([]() { quit(); });
 
   selected = -1;
   show_help = false;
@@ -52,8 +45,8 @@ void Menu::update(float dt) {
   if (show_help) {
     if (asw::input::get_mouse_button_down(asw::input::MouseButton::Left) ||
         asw::input::get_keyboard().any_pressed ||
-        controller_down(ControllerButton::A) ||
-        controller_down(ControllerButton::B)) {
+        asw::input::get_action_down(action::CONFIRM) ||
+        asw::input::get_action_down(action::BACK)) {
       Audio::play(Sfx::Click);
       show_help = false;
     }
@@ -69,14 +62,10 @@ void Menu::update(float dt) {
     }
   }
 
-  if (asw::input::get_key_down(Key::Down) ||
-      asw::input::get_key_down(Key::S) ||
-      controller_down(ControllerButton::DPadDown)) {
+  if (asw::input::get_action_down(action::MENU_DOWN)) {
     selected = (selected + 1) % NUM_BUTTONS;
     Audio::play(Sfx::Click, 0.5F);
-  } else if (asw::input::get_key_down(Key::Up) ||
-             asw::input::get_key_down(Key::W) ||
-             controller_down(ControllerButton::DPadUp)) {
+  } else if (asw::input::get_action_down(action::MENU_UP)) {
     selected = (selected + NUM_BUTTONS - 1) % NUM_BUTTONS;
     Audio::play(Sfx::Click, 0.5F);
   }
@@ -85,9 +74,7 @@ void Menu::update(float dt) {
     buttons[i].set_selected(i == selected);
   }
 
-  const bool confirm = asw::input::get_key_down(Key::Return) ||
-                       asw::input::get_key_down(Key::Space) ||
-                       controller_down(ControllerButton::A);
+  const bool confirm = asw::input::get_action_down(action::CONFIRM);
 
   if (confirm && selected == BUTTON_START) {
     Audio::play(Sfx::Click);
@@ -100,7 +87,7 @@ void Menu::update(float dt) {
     return;
   }
   if (confirm && selected == BUTTON_QUIT) {
-    asw::core::exit();
+    quit();
     return;
   }
 
@@ -120,7 +107,23 @@ void Menu::draw() {
     draw_help();
   }
 
+  // Screenshots leave out the cursor
+  handle_screenshot_key();
+
   draw_cursor();
+}
+
+void Menu::quit() {
+  Audio::play(Sfx::Click);
+
+  // Native dialogs only on desktop, closing the tab is the way out on the web
+#ifndef __EMSCRIPTEN__
+  if (!asw::dialog::confirm("Slime Knight", "Quit the game?")) {
+    return;
+  }
+#endif
+
+  asw::core::exit();
 }
 
 void Menu::draw_help() const {
@@ -151,10 +154,13 @@ void Menu::draw_help() const {
       "Gamepads work too: A swing, B dash, Y hammer, D-pad packages.",
   };
 
+  // Line spacing follows the font
+  const auto line_height =
+      static_cast<float>(asw::util::get_font_height(font_text)) + 5.0F;
   float y = 140.0F;
   for (const auto* line : lines) {
     asw::draw::text(font_text, line, asw::Vec2f(60, y), asw::Color(0, 0, 0));
-    y += 36.0F;
+    y += line_height;
   }
 
   asw::draw::text(font_text, "Click or press any key to go back",

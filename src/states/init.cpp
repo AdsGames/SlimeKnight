@@ -1,5 +1,6 @@
 #include "./init.h"
 
+#include "../controls.h"
 #include "../save_data.h"
 #include "../game/audio.h"
 
@@ -11,8 +12,9 @@ void Init::init() {
   asw::display::set_blend_mode(asw::BlendMode::Blend);
 
   // Menus draw their own sword cursor
-  SDL_HideCursor();
+  asw::input::set_cursor_visible(false);
 
+  bind_controls();
   Audio::load();
   SaveData::load();
 

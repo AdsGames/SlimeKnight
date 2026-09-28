@@ -3,7 +3,6 @@
 #include <asw/asw.h>
 #include <deque>
 
-#include "../camera.h"
 
 // Input for one step, read from keyboard and controller
 struct KnightInput {
@@ -25,7 +24,7 @@ class Knight {
   void reset(const asw::Vec2f& position);
 
   void update(float dt, const KnightInput& input);
-  void draw(const Camera& camera) const;
+  void draw(const asw::Camera& camera) const;
 
   // Solid body around the feet
   asw::Quadf body() const;

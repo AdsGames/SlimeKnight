@@ -5,8 +5,10 @@
 #include <numbers>
 #include <string>
 
-#include "../save_data.h"
+#include "../controls.h"
 #include "../game/audio.h"
+#include "../save_data.h"
+#include "../ui/screenshot.h"
 
 namespace {
 // Care package costs in power, index matches PackageType
@@ -53,23 +55,6 @@ asw::Color slime_color(SlimeType type) {
   return {40, 220, 60};
 }
 
-// Closest distance from a point to a box
-float distance_to_box(const asw::Vec2f& point, const asw::Quadf& box) {
-  const float cx = std::clamp(point.x, box.position.x,
-                              box.position.x + box.size.x);
-  const float cy = std::clamp(point.y, box.position.y,
-                              box.position.y + box.size.y);
-  return asw::Vec2f(cx, cy).distance(point);
-}
-
-asw::Vec2f normalized(const asw::Vec2f& v) {
-  const float length = v.magnitude();
-  if (length < 0.0001F) {
-    return {0, 0};
-  }
-  return v / length;
-}
-
 const asw::Quadf WALK_AREA(WALK_INSET,
                            WALK_INSET,
                            WORLD_W - (WALK_INSET * 2),
@@ -111,11 +96,17 @@ void Game::load_assets() {
   tex_tower_open = asw::assets::load_texture(images + "game/tower_open.png");
   tex_tower_broken =
       asw::assets::load_texture(images + "game/tower_broken.png");
-  tex_slime_green = asw::assets::load_texture(images + "game/slime_green.png");
-  tex_slime_red = asw::assets::load_texture(images + "game/slime_red.png");
-  tex_slime_purple =
-      asw::assets::load_texture(images + "game/slime_purple.png");
-  tex_boss = asw::assets::load_texture(images + "game/boss.png");
+  // Slime sheets are 2x2 frames, sizes match the original animation files
+  const asw::Vec2f slime_frame(72.0F, 46.08F);
+  sheet_slime_green = asw::SpriteSheet(
+      asw::assets::load_texture(images + "game/slime_green.png"), slime_frame);
+  sheet_slime_red = asw::SpriteSheet(
+      asw::assets::load_texture(images + "game/slime_red.png"), slime_frame);
+  sheet_slime_purple = asw::SpriteSheet(
+      asw::assets::load_texture(images + "game/slime_purple.png"), slime_frame);
+  sheet_boss =
+      asw::SpriteSheet(asw::assets::load_texture(images + "game/boss.png"),
+                       asw::Vec2f(144.0F, 92.16F));
   tex_slime_death = asw::assets::load_texture(images + "game/slime_death.png");
   tex_hud = asw::assets::load_texture(images + "ui/hud.png");
   tex_bar_health = asw::assets::load_texture(images + "ui/bar_health.png");
@@ -215,14 +206,14 @@ void Game::build_level() {
 
   camera.set_bounds(asw::Quadf(0, -210, WORLD_W, WORLD_H + 210));
   camera.set_anchor(asw::Vec2f(SCREEN_W / 2.0F, 600.0F));
-  camera.snap(knight.center());
+  camera.snap_to(knight.center());
+  Audio::set_listener(knight.center());
 
   // First wave comes a little sooner than the rest
   spawn_timer = config->spawn_interval * 0.4F;
   level_time = 0.0F;
   hitstop = 0.0F;
   finish_timer = 0.0F;
-  lag = 0.0F;
   gates_open = false;
   boss_spawned = false;
   paused = false;
@@ -237,19 +228,10 @@ void Game::build_level() {
 }
 
 void Game::update(float dt) {
-  using asw::input::ControllerButton;
-  using asw::input::Key;
-
   asw::scene::Scene<ProgramState>::update(dt);
 
   // Pause
-  const bool pause_pressed =
-      asw::input::get_key_down(Key::Escape) ||
-      asw::input::get_key_down(Key::P) ||
-      (asw::input::get_controller_count() > 0 &&
-       asw::input::get_controller_button_down(0, ControllerButton::Start));
-
-  if (pause_pressed && !finished) {
+  if (asw::input::get_action_down(action::PAUSE) && !finished) {
     paused = !paused;
     Audio::play(Sfx::Click);
     if (paused) {
@@ -260,21 +242,14 @@ void Game::update(float dt) {
   }
 
   if (paused) {
-    if (asw::input::get_key_down(Key::Q) ||
-        asw::input::get_key_down(Key::Backspace) ||
-        (asw::input::get_controller_count() > 0 &&
-         asw::input::get_controller_button_down(0, ControllerButton::Back))) {
+    if (asw::input::get_action_down(action::QUIT_LEVEL)) {
       manager.set_next_scene(ProgramState::LevelSelect);
     }
     return;
   }
 
-  // Run the simulation in fixed steps
-  lag = std::min(lag + dt, MAX_LAG);
-  while (lag >= FIXED_STEP - STEP_EPSILON) {
-    step(FIXED_STEP);
-    lag -= FIXED_STEP;
-  }
+  // asw calls update in fixed steps on every platform
+  step(dt);
 }
 
 void Game::step(float dt) {
@@ -290,6 +265,7 @@ void Game::step(float dt) {
   if (finished) {
     finish_timer -= dt;
     camera.follow(knight.center(), dt);
+    camera.update(dt);
     update_slimes(dt);
 
     if (finish_timer <= 0.0F) {
@@ -322,6 +298,7 @@ void Game::step(float dt) {
   }
 
   knight.update(dt, input);
+  Audio::set_listener(knight.center());
 
   // Keep the knight out of scenery and on the map
   const auto body = resolve_solids(knight.body());
@@ -341,6 +318,7 @@ void Game::step(float dt) {
   update_combo(dt);
 
   camera.follow(knight.center(), dt);
+  camera.update(dt);
 
   check_end();
 }
@@ -360,13 +338,15 @@ void Game::update_towers(float dt) {
 
   spawn_timer += dt;
 
-  // Gates open just before a wave and close after it
+  // Gates open just before a wave and close after it, heard from the
+  // closest tower
+  const auto* nearest = nearest_tower();
   if (!gates_open && spawn_timer >= interval - 0.6F) {
     gates_open = true;
-    Audio::play(Sfx::GateOpen, 0.3F);
+    Audio::play_at(Sfx::GateOpen, nearest->base, 0.5F);
   } else if (gates_open && spawn_timer > 0.5F && spawn_timer < interval - 0.6F) {
     gates_open = false;
-    Audio::play(Sfx::GateClose, 0.3F);
+    Audio::play_at(Sfx::GateClose, nearest->base, 0.5F);
   }
 
   if (spawn_timer < interval) {
@@ -375,7 +355,6 @@ void Game::update_towers(float dt) {
 
   spawn_timer = 0.0F;
 
-  bool played = false;
   for (const auto& tower : towers) {
     if (tower.destroyed || slimes.size() + new_slimes.size() >= MAX_SLIMES) {
       continue;
@@ -390,16 +369,27 @@ void Game::update_towers(float dt) {
     }
 
     new_slimes.push_back(make_slime(type, tower.base + asw::Vec2f(0, 24)));
+  }
 
-    // One spawn sound per wave, from the nearest visible tower
-    const auto screen = camera.to_screen(tower.base);
-    if (!played && camera.get_view().contains(tower.base)) {
-      Audio::play_at(asw::random::chance() ? Sfx::SlimeSpawn1
-                                           : Sfx::SlimeSpawn2,
-                     screen.x, 0.7F);
-      played = true;
+  // One spawn sound per wave, from the closest tower
+  Audio::play_at(
+      asw::random::chance() ? Sfx::SlimeSpawn1 : Sfx::SlimeSpawn2,
+      nearest->base, 0.8F);
+}
+
+const Tower* Game::nearest_tower() const {
+  const Tower* nearest = nullptr;
+  float best = 0.0F;
+
+  for (const auto& tower : towers) {
+    const float distance = tower.base.distance(knight.position);
+    if (!tower.destroyed && (nearest == nullptr || distance < best)) {
+      nearest = &tower;
+      best = distance;
     }
   }
+
+  return nearest;
 }
 
 Slime Game::make_slime(SlimeType type, const asw::Vec2f& position) const {
@@ -407,7 +397,8 @@ Slime Game::make_slime(SlimeType type, const asw::Vec2f& position) const {
   slime.type = type;
   slime.position = position;
   slime.spawn_timer = 0.35F;
-  slime.anim_timer = asw::random::between(0.0F, 1.0F);
+  // Start at a random point so slimes do not wobble in step
+  slime.animation.update(asw::random::between(0.0F, 1.0F));
 
   switch (type) {
     case SlimeType::Green:
@@ -450,7 +441,7 @@ void Game::update_slimes(float dt) {
   new_slimes.clear();
 
   for (auto& slime : slimes) {
-    slime.anim_timer += dt;
+    slime.animation.update(dt);
     slime.hurt_timer = std::max(0.0F, slime.hurt_timer - dt);
 
     if (slime.spawn_timer > 0.0F) {
@@ -458,7 +449,7 @@ void Game::update_slimes(float dt) {
       continue;
     }
 
-    const auto to_knight = normalized(knight.position - slime.position);
+    const auto to_knight = (knight.position - slime.position).normalized();
 
     if (slime.type == SlimeType::Boss) {
       // Boss creeps forward and charges now and then
@@ -467,7 +458,7 @@ void Game::update_slimes(float dt) {
         if (slime.telegraph_timer <= 0.0F) {
           slime.velocity = to_knight * 900.0F;
           camera.shake(10.0F);
-          Audio::play(Sfx::Splat, 0.6F);
+          Audio::play_at(Sfx::Splat, slime.position, 0.8F);
           slime.charge_timer = asw::random::between(3.0F, 4.5F);
         }
       } else {
@@ -562,7 +553,8 @@ void Game::update_packages(float dt) {
       package.fall_timer += dt;
       if (package.fall_timer >= Package::FALL_TIME) {
         package.landed = true;
-        Audio::play_at(Sfx::Drop, camera.to_screen(package.target).x, 0.8F);
+        package.wind.stop(0.4F);
+        Audio::play_at(Sfx::Drop, package.target, 0.8F);
         effects.burst(package.target, asw::Color(180, 150, 90), 14, 180.0F);
       }
       continue;
@@ -651,7 +643,7 @@ void Game::swing() {
       continue;
     }
 
-    if (distance_to_box(center, slime.hitbox()) <= Knight::SWING_RADIUS * 0.6F) {
+    if (slime.hitbox().distance_to(center) <= Knight::SWING_RADIUS * 0.6F) {
       hit_slime(slime, 1, knight.center());
     }
   }
@@ -677,24 +669,28 @@ void Game::slam() {
   // Towers in range crumble
   for (auto& tower : towers) {
     if (tower.destroyed ||
-        distance_to_box(origin, tower.footprint()) > SLAM_TOWER_RANGE) {
+        tower.footprint().distance_to(origin) > SLAM_TOWER_RANGE) {
       continue;
     }
 
     tower.destroyed = true;
     hitstop = 0.12F;
     camera.shake(26.0F);
-    Audio::play(Sfx::TowerDestroy);
 
+    // Let the crash cut through the music
     const auto middle = tower.sprite_area().get_center();
-    effects.burst(middle, asw::Color(70, 70, 70), 40, 520.0F, 12.0F, 500.0F);
+    Audio::play_at(Sfx::TowerDestroy, middle);
+    Audio::duck_music(0.35F, 0.6F);
+
+    effects.debris(middle, tower.base.y, asw::Color(70, 70, 75), 28);
+    effects.burst(middle, asw::Color(120, 110, 100, 160), 20, 300.0F, 14.0F);
     effects.burst(middle, asw::Color(40, 220, 60), 25, 420.0F, 8.0F, 300.0F);
     effects.text(middle, "TOWER DESTROYED!", asw::Color(255, 220, 60), true);
   }
 
   // Slimes nearby are flattened
   for (auto& slime : slimes) {
-    if (distance_to_box(origin, slime.hitbox()) <= SLAM_SLIME_RANGE) {
+    if (slime.hitbox().distance_to(origin) <= SLAM_SLIME_RANGE) {
       hit_slime(slime, slime.type == SlimeType::Boss ? 4 : 3, origin);
     }
   }
@@ -731,9 +727,8 @@ void Game::call_package(int index) {
   package.target.y =
       std::clamp(package.target.y, WALK_AREA.position.y + 60.0F,
                  WALK_AREA.position.y + WALK_AREA.size.y);
+  package.wind = Audio::play_at(Sfx::Wind, package.target, 0.5F);
   packages.push_back(package);
-
-  Audio::play(Sfx::Wind, 0.4F);
 }
 
 void Game::spawn_boss() {
@@ -746,7 +741,7 @@ void Game::spawn_boss() {
   slimes.push_back(make_slime(SlimeType::Boss, position));
 
   Audio::play_music("boss");
-  Audio::play(Sfx::SlimeSpawn1);
+  Audio::play_at(Sfx::SlimeSpawn1, position);
   camera.shake(20.0F);
   set_banner("The Slime King awakens!", "Every hit makes him smaller...");
 }
@@ -759,7 +754,7 @@ void Game::hit_slime(Slime& slime, int damage, const asw::Vec2f& from) {
   slime.health -= damage;
   slime.hurt_timer = 0.15F;
 
-  const auto away = normalized(slime.position - from);
+  const auto away = (slime.position - from).normalized();
   const auto center = slime_center(slime);
 
   if (slime.health <= 0) {
@@ -791,7 +786,7 @@ void Game::hit_slime(Slime& slime, int damage, const asw::Vec2f& from) {
     slime.velocity = away * 520.0F;
   }
 
-  Audio::play_at(Sfx::SlimeHit, camera.to_screen(center).x, 0.6F);
+  Audio::play_at(Sfx::SlimeHit, center, 0.7F);
   effects.burst(center, slime_color(slime.type), 8, 220.0F);
 }
 
@@ -808,7 +803,7 @@ void Game::kill_slime(Slime& slime) {
   effects.burst(center, color, slime.type == SlimeType::Boss ? 120 : 18,
                 slime.type == SlimeType::Boss ? 700.0F : 320.0F,
                 slime.type == SlimeType::Boss ? 12.0F : 6.0F);
-  Audio::play_at(Sfx::Splat, camera.to_screen(center).x, 0.6F);
+  Audio::play_at(Sfx::Splat, center, 0.7F);
 
   kills++;
 
@@ -852,6 +847,7 @@ void Game::kill_slime(Slime& slime) {
     camera.shake(30.0F);
     hitstop = 0.25F;
     Audio::play(Sfx::TowerDestroy);
+    Audio::duck_music(0.2F, 1.5F);
     effects.text(center, "THE SLIME KING IS DEAD!", asw::Color(255, 220, 60),
                  true);
   }
@@ -862,33 +858,13 @@ asw::Vec2f Game::slime_center(const Slime& slime) const {
 }
 
 asw::Quadf Game::resolve_solids(asw::Quadf box) const {
-  const auto push_out = [&box](const asw::Quadf& solid) {
-    if (!box.collides(solid)) {
-      return;
-    }
-
-    const float left = (box.position.x + box.size.x) - solid.position.x;
-    const float right = (solid.position.x + solid.size.x) - box.position.x;
-    const float up = (box.position.y + box.size.y) - solid.position.y;
-    const float down = (solid.position.y + solid.size.y) - box.position.y;
-
-    // Move out along the smallest overlap
-    const float min_x = std::min(left, right);
-    const float min_y = std::min(up, down);
-    if (min_x < min_y) {
-      box.position.x += left < right ? -left : right;
-    } else {
-      box.position.y += up < down ? -up : down;
-    }
-  };
-
   for (const auto& ruin : ruins) {
-    push_out(ruin.bounds);
+    box.position += box.get_push_out(ruin.bounds);
   }
 
   for (const auto& tower : towers) {
     if (!tower.destroyed) {
-      push_out(tower.footprint());
+      box.position += box.get_push_out(tower.footprint());
     }
   }
 
@@ -941,6 +917,8 @@ void Game::draw() {
   if (paused) {
     draw_pause();
   }
+
+  handle_screenshot_key();
 }
 
 void Game::draw_map() const {
@@ -960,12 +938,12 @@ void Game::draw_map() const {
   const asw::Quadf source(world.position.x * sx, world.position.y * sy,
                           world.size.x * sx, world.size.y * sy);
 
-  asw::draw::stretch_sprite_blit(tex_map, source, camera.to_screen(world));
+  asw::draw::stretch_sprite_blit(tex_map, source, camera.world_to_screen(world));
 }
 
 void Game::draw_shadow(const asw::Vec2f& position, float width) const {
   const float height = width * 0.35F;
-  const auto screen = camera.to_screen(position);
+  const auto screen = camera.world_to_screen(position);
   asw::draw::stretch_sprite(
       tex_shadow,
       asw::Quadf(screen.x - width / 2, screen.y - height / 2, width, height));
@@ -1019,7 +997,7 @@ void Game::draw_objects() const {
     switch (item.kind) {
       case Kind::Ruin:
         asw::draw::stretch_sprite(tex_ruin,
-                                  camera.to_screen(ruins[item.index].bounds));
+                                  camera.world_to_screen(ruins[item.index].bounds));
         break;
 
       case Kind::Tower: {
@@ -1029,7 +1007,7 @@ void Game::draw_objects() const {
                                   ? tex_tower_broken
                                   : (gates_open ? tex_tower_open : tex_tower);
         asw::draw::stretch_sprite(texture,
-                                  camera.to_screen(tower.sprite_area()));
+                                  camera.world_to_screen(tower.sprite_area()));
         break;
       }
 
@@ -1048,7 +1026,7 @@ void Game::draw_objects() const {
         box.position.y += std::sin(level_time * 4.0F) * 3.0F;
         draw_shadow(package.target, 44.0F);
         asw::draw::stretch_sprite(tex_boxes[static_cast<int>(package.type)],
-                                  camera.to_screen(box));
+                                  camera.world_to_screen(box));
         break;
       }
     }
@@ -1068,28 +1046,26 @@ void Game::draw_objects() const {
     const asw::Quadf chute(package.target.x - 45.0F + sway,
                            package.target.y - 120.0F - height, 90.0F, 120.0F);
     asw::draw::stretch_sprite(tex_parachutes[static_cast<int>(package.type)],
-                              camera.to_screen(chute));
+                              camera.world_to_screen(chute));
   }
 }
 
 void Game::draw_slime(const Slime& slime) const {
-  const asw::Texture* texture = &tex_slime_green;
-  asw::Vec2f frame_size(72, 46);
+  const asw::SpriteSheet* sheet = &sheet_slime_green;
 
   switch (slime.type) {
     case SlimeType::Green:
-      texture = &tex_slime_green;
+      sheet = &sheet_slime_green;
       break;
     case SlimeType::Red:
-      texture = &tex_slime_red;
+      sheet = &sheet_slime_red;
       break;
     case SlimeType::Purple:
     case SlimeType::Mini:
-      texture = &tex_slime_purple;
+      sheet = &sheet_slime_purple;
       break;
     case SlimeType::Boss:
-      texture = &tex_boss;
-      frame_size = asw::Vec2f(144, 92);
+      sheet = &sheet_boss;
       break;
   }
 
@@ -1116,23 +1092,19 @@ void Game::draw_slime(const Slime& slime) const {
 
   draw_shadow(slime.position, size.x * 0.9F);
 
-  const int frame = static_cast<int>(slime.anim_timer / 0.2F) % 4;
-  const asw::Quadf source(static_cast<float>(frame % 2) * frame_size.x,
-                          static_cast<float>(frame / 2) * frame_size.y,
-                          frame_size.x, frame_size.y);
   const asw::Quadf dest(base.x - size.x / 2, base.y - size.y, size.x, size.y);
 
   const bool flash = slime.hurt_timer > 0.0F ||
                      (slime.telegraph_timer > 0.0F &&
                       static_cast<int>(slime.telegraph_timer * 10.0F) % 2 == 0);
   if (flash) {
-    asw::draw::set_tint(*texture, asw::Color(255, 90, 90));
+    asw::draw::set_tint(sheet->get_texture(), asw::Color(255, 90, 90));
   }
 
-  asw::draw::stretch_sprite_blit(*texture, source, camera.to_screen(dest));
+  sheet->draw_frame(slime.animation.get_frame(), camera.world_to_screen(dest));
 
   if (flash) {
-    asw::draw::set_tint(*texture, asw::Color(255, 255, 255));
+    asw::draw::set_tint(sheet->get_texture(), asw::Color(255, 255, 255));
   }
 
 }
@@ -1148,8 +1120,8 @@ void Game::draw_tower_markers() const {
       continue;
     }
 
-    const auto screen = camera.to_screen(tower.base + asw::Vec2f(0, -100));
-    const auto dir = normalized(screen - center);
+    const auto screen = camera.world_to_screen(tower.base + asw::Vec2f(0, -100));
+    const auto dir = (screen - center).normalized();
 
     // Walk out from the middle until the edge of the area
     const float tx = dir.x > 0 ? (area.position.x + area.size.x - center.x) / dir.x
@@ -1230,8 +1202,20 @@ void Game::draw_hud() const {
     asw::draw::stretch_sprite(
         tex_destroy_ready,
         asw::Quadf(640 - pulse / 2, 64 - pulse / 2, 84 + pulse, 84 + pulse));
-    asw::draw::text(font_small, "E", asw::Vec2f(716, 128),
+    asw::draw::text(font_small, prompt("E", "Y"), asw::Vec2f(716, 128),
                     asw::Color(0, 0, 0));
+  }
+
+  // Icons show number keys, name the d-pad direction for controllers
+  if (using_controller()) {
+    constexpr std::array<const char*, 4> directions = {"Up", "Left", "Right",
+                                                       "Down"};
+    for (std::size_t i = 0; i < directions.size(); i++) {
+      asw::draw::text(font_small, directions[i],
+                      asw::Vec2f(PACKAGE_ICON_X[i] + PACKAGE_ICON_SIZE / 2,
+                                 PACKAGE_ICON_Y + PACKAGE_ICON_SIZE + 4),
+                      asw::Color(60, 30, 0), asw::TextJustify::Center);
+    }
   }
 
   // Level info
@@ -1340,10 +1324,9 @@ void Game::draw_banner() const {
 
   asw::draw::rect_fill(asw::Quadf(0, y - 20, SCREEN_W, 120),
                        asw::Color(0, 0, 0, static_cast<uint8_t>(140.0F * fade)));
-  asw::draw::text(font_big, banner_title, asw::Vec2f(SCREEN_W / 2.0F + 3, y + 3),
-                  asw::Color(0, 0, 0, alpha), asw::TextJustify::Center);
-  asw::draw::text(font_big, banner_title, asw::Vec2f(SCREEN_W / 2.0F, y),
-                  asw::Color(255, 220, 60, alpha), asw::TextJustify::Center);
+  asw::draw::text_shadow(font_big, banner_title, asw::Vec2f(SCREEN_W / 2.0F, y),
+                         asw::Color(255, 220, 60, alpha), asw::Color(0, 0, 0),
+                         asw::Vec2f(3, 3), asw::TextJustify::Center);
   asw::draw::text(font_medium, banner_subtitle,
                   asw::Vec2f(SCREEN_W / 2.0F, y + 62),
                   asw::Color(255, 255, 255, alpha), asw::TextJustify::Center);
@@ -1355,7 +1338,7 @@ void Game::draw_pause() const {
   asw::draw::text(font_big, "Paused", asw::Vec2f(SCREEN_W / 2.0F, 330),
                   asw::Color(255, 220, 60), asw::TextJustify::Center);
 
-  const std::array<const char*, 9> lines = {
+  const std::array<const char*, 8> keyboard_lines = {
       "WASD / Arrows  -  Move",
       "Space / J  -  Swing sword (hold to keep swinging)",
       "Shift / K  -  Dash through slimes",
@@ -1364,13 +1347,26 @@ void Game::draw_pause() const {
       "",
       "Esc / P  -  Resume",
       "Q  -  Quit to level select",
-      "",
   };
+  const std::array<const char*, 8> controller_lines = {
+      "Left stick  -  Move",
+      "A  -  Swing sword (hold to keep swinging)",
+      "B  -  Dash through slimes",
+      "Y  -  Hammer slam (smashes towers)",
+      "D-pad  -  Call in care packages",
+      "",
+      "Start  -  Resume",
+      "Back  -  Quit to level select",
+  };
+  const auto& lines = using_controller() ? controller_lines : keyboard_lines;
 
+  // Line spacing follows the font
+  const auto line_height =
+      static_cast<float>(asw::util::get_font_height(font_medium)) + 6.0F;
   float y = 420.0F;
   for (const auto* line : lines) {
     asw::draw::text(font_medium, line, asw::Vec2f(SCREEN_W / 2.0F, y),
                     asw::Color(255, 255, 255), asw::TextJustify::Center);
-    y += 34.0F;
+    y += line_height;
   }
 }

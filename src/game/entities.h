@@ -30,7 +30,8 @@ struct Slime {
   float hop_timer{0.0F};
   float hop_period{1.0F};
   float hop_speed{300.0F};
-  float anim_timer{0.0F};
+  // Four frame wobble, 0.2 seconds a frame
+  asw::Animation animation{4, 0.2F};
   float hurt_timer{0.0F};
   float spawn_timer{0.0F};
   // Boss charge state
@@ -76,6 +77,9 @@ struct Package {
   float fall_timer{0.0F};
   bool landed{false};
   bool collected{false};
+
+  // Wind while it falls, stopped when it lands
+  asw::sound::SoundHandle wind;
 
   static constexpr float FALL_TIME = 1.4F;
   static constexpr float BOX_SIZE = 40.0F;
